@@ -9,60 +9,73 @@
 #Include Lib\JSON.ahk
 SetWorkingDir A_ScriptDir
 
+
 isChinese := GetLocaleLanguage() = "zh-CN"
 
 useBuiltInEverything := false ; 是否使用类内置的Everything
 
-; 检查编码确认 utf-8
+; 检查编码确认 utf-8, 如果有控制台那么设置成这个编码
 if (encode := DllCall("GetConsoleOutputCP")) != 0 && encode != 65001{
     DllCall("SetConsoleOutputCP", "UInt", 65001)
 }
 
+;@region -----------这里获取ahk的安装目录----------------------------------
+; 先查看注册表中记录的是否有对应的信息,如果没有在去用everything来搜索
 
-try{
-    ; 先初始化Everything,这个是必要的
-    if !Everything.IsDBLoaded() && !Everything.HasEverythingProcess() {
-        useBuiltInEverything := true
-        Everything.RunEverything()
-        tiploading := () => ToolTip(isChinese ? "初始化Everything中..." : "Initialize Everything...")
-        SetTimer tiploading, 50
-        if Everything.WaitDBLoaded(20000) {
-            SetTimer tiploading, 0
-            ToolTip
-            Everything.SaveDB()
-        }else{
-            SetTimer tiploading, 0
-            ToolTip
-            msgbox(isChinese ? "Everything初始化失败,请手动选择AutoHotkey.exe所在的目录或重新安装Everything" : "Everything failed to initialize, please manually select the directory where AutoHotkey.exe is located or reinstall Everything")
+InstallDir := RegRead("HKLM\SOFTWARE\AutoHotkey", "InstallDir", "")
+ahkDirPath := InstallDir ? InstallDir.ConcatP("v2") : ""
+
+if ahkDirPath == ""{
+    try{
+        ; 先初始化Everything,这个是必要的
+        if !Everything.IsDBLoaded() && !Everything.HasEverythingProcess() {
+            useBuiltInEverything := true
+            Everything.RunEverything()
+            tiploading := () => ToolTip(isChinese ? "初始化Everything中..." : "Initialize Everything...")
+            SetTimer tiploading, 50
+            if Everything.WaitDBLoaded(20000) {
+                SetTimer tiploading, 0
+                ToolTip
+                Everything.SaveDB()
+            }else{
+                SetTimer tiploading, 0
+                ToolTip
+                msgbox(isChinese ? "Everything初始化失败,请手动选择AutoHotkey.exe所在的目录或重新安装Everything" : "Everything failed to initialize, please manually select the directory where AutoHotkey.exe is located or reinstall Everything")
+            }
+        }
+    
+        if Everything.IsDBLoaded() {
+            dir1Arr := Everything.GetAllDir("wfn:AutoHotkey.exe")
+            dir2Arr := Everything.GetAllDir("wfn:AutoHotkey32.exe")
+            dir3Arr := Everything.GetAllDir("wfn:AutoHotkey64.exe")
+            dirArr := dir1Arr.Intersect(dir2Arr, dir3Arr)
+            if dirArr.Length == 1 {
+                ahkDirPath := dirArr[1]
+            }
+        }
+    
+        if !IsSet(ahkDirPath){
+            msgbox(isChinese ? "我们无法确认AutoHotkey.exe文件的目录位置,请你手动选择" : "We cannot confirm the directory location of the AutoHotkey.exe file, please select it manually")
+            ahkDirPath := DirSelect("*",3, isChinese ? "请选择AutoHotkey.exe所在目录" : "Select the directory where AutoHotkey.exe resides")
         }
     }
-
-    if Everything.IsDBLoaded() {
-        dir1Arr := Everything.GetAllDir("wfn:AutoHotkey.exe")
-        dir2Arr := Everything.GetAllDir("wfn:AutoHotkey32.exe")
-        dir3Arr := Everything.GetAllDir("wfn:AutoHotkey64.exe")
-        dirArr := dir1Arr.Intersect(dir2Arr, dir3Arr)
-        if dirArr.Length == 1 {
-            ahkDirPath := dirArr[1]
+    
+    
+    if useBuiltInEverything {
+        if Everything.Exit() = 0 && ProcessExist("everything.exe") {
+            ProcessClose("everything.exe")
         }
     }
-
-    if !IsSet(ahkDirPath){
-        msgbox(isChinese ? "我们无法确认AutoHotkey.exe文件的目录位置,请你手动选择" : "We cannot confirm the directory location of the AutoHotkey.exe file, please select it manually")
-        ahkDirPath := DirSelect("*",3, isChinese ? "请选择AutoHotkey.exe所在目录" : "Select the directory where AutoHotkey.exe resides")
-    }
+    
 }
 
-
-if useBuiltInEverything {
-    if Everything.Exit() = 0 && ProcessExist("everything.exe") {
-        ProcessClose("everything.exe")
-    }
-}
 
 if !ahkDirPath{
     return
 }
+
+;@endregion
+;---------获取ahk安装位置结束----------------------------------
 
 
 
@@ -85,15 +98,37 @@ installPackages(){
     ; println("安装若干个安装包:", argObj.packageNames)
     for packageName in argObj.packageNames {
         try{
-            downloadPackage(packageName)
+            ; 先解析包名和版本号
+            getPkgNameAndVersion(packageName, &pkgName, &pkgVersion)
+            ; 根据包名和版本号来下载具体的包
+            downloadPackage(pkgName, pkgVesion)
+            ; 这里将下载好的包放到当前的目录下面
+            installPackageToLocal(packageName)
+            ; 将当前的下载的包保存到package.json
+            savePackageInfo(packageName)
+
         }catch{
             println(isChinese ? packageName.Concat("下载失败") : packageName.Concat(" download failed"))
         }
     }
 }
 
+; 根据用户输入的包名获取包名和包的版本号
+getPkgNameAndVersion(inputPkgName, &pkgName, &pkgVerison){
 
-downloadPackage(packageName){
+}
+
+; 安装包到本地的目录下面,其实就是在当前目录下面创建一个 Lib 并且给出对应的内容
+installPackageToLocal(packageName){
+    
+}
+
+; 将安装的包的信息保存到package.json
+savePackageInfo(packageName){
+
+}
+
+downloadPackage(pkgName, pkgVersion){
     
     println(isChinese ? "正在下载: ".Concat(packageName, "...") : "downloading: ".Concat(packageName, "..."))
     ; 正常化包名
@@ -151,16 +186,16 @@ downloadPackage(packageName){
             tempDir.ConcatP(packageName ".tar"), '" ',
             "-o`"", tempDir, '"'
         )
-        println("两条命令分别为")
-        println(unzipCmd)
-        println(unzipCmd2)
+        ; println("两条命令分别为")
+        ; println(unzipCmd)
+        ; println(unzipCmd2)
         ret := StdoutToVar(unzipCmd)
         if ret.ExitCode != 0 {
             ; 清除操作
             if DirExist(tempDir){
                 try DirDelete(tempDir, 1)
             }
-            msgbox(isChinese ? packageName.Concat("1包解压失败!请检查后重试!`n", ret.Output) : packageName.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
+            msgbox(isChinese ? packageName.Concat("1.包解压失败!请检查后重试!`n", ret.Output) : packageName.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
             ExitApp
         }
 
@@ -171,7 +206,7 @@ downloadPackage(packageName){
             if DirExist(tempDir){
                 try DirDelete(tempDir, 1)
             }
-            msgbox(isChinese ? packageName.Concat("2包解压失败!请检查后重试!`n", ret.Output) : packageName.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
+            msgbox(isChinese ? packageName.Concat("2.包解压失败!请检查后重试!`n", ret.Output) : packageName.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
             ExitApp
         }
 

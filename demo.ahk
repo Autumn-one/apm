@@ -18,9 +18,13 @@ SetWorkingDir A_ScriptDir
 
 ; println("c:\".ConcatP("abc", "dde"))
 
-ret := JSON.load(packageJsonText)
+; ret := JSON.load(packageJsonText)
 
 ; println(ret)
 
 ; println(ret.Has("name"))
+; println([1,2,3])
 
+; SetTimer () => println(GetKeyState("CapsLock", "T")), 1000
+
+; GetKeyState("CapsLock", "T")
