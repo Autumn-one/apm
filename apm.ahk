@@ -2,13 +2,32 @@
 #SingleInstance Force
 #include <stdlib>
 #include utils.ahk
-#include <env>
-#include Lib\everything.ahk
+#include tools\env.ahk
+#include tools\everything.ahk
 #include package.json.ahk
-#Include Lib\http.ahk
-#Include Lib\JSON.ahk
+#Include tools\http.ahk
+#Include tools\JSON.ahk
 SetWorkingDir A_ScriptDir
 
+
+
+; 管理员权限运行
+full_command_line := DllCall("GetCommandLine", "str")
+
+if not (A_IsAdmin or RegExMatch(full_command_line, " /restart(?!\S)"))
+{
+    try
+    {
+        if A_IsCompiled
+            Run '*RunAs cmd.exe /k "' A_ScriptFullPath '" ' A_Args.Join(" ") ' /restart'
+        else
+            Run '*RunAs "' A_AhkPath '" /restart "' A_ScriptFullPath '" ' A_Args.Join(" ")
+    }
+    ExitApp
+}
+
+
+apm_version := "0.0.1"
 
 isChinese := GetLocaleLanguage() = "zh-CN"
 
@@ -77,8 +96,6 @@ if !ahkDirPath{
 ;@endregion
 ;---------获取ahk安装位置结束----------------------------------
 
-
-
 ; 解析命令行参数
 argObj := ParserArgs()
 
@@ -96,56 +113,237 @@ installHandle(){
 installPackages(){
     initHandle() ; 初始化package.json
     ; println("安装若干个安装包:", argObj.packageNames)
-    for packageName in argObj.packageNames {
-        try{
-            ; 先解析包名和版本号
-            getPkgNameAndVersion(packageName, &pkgName, &pkgVersion)
-            ; 根据包名和版本号来下载具体的包
-            downloadPackage(pkgName, pkgVesion)
-            ; 这里将下载好的包放到当前的目录下面
-            installPackageToLocal(packageName)
-            ; 将当前的下载的包保存到package.json
-            savePackageInfo(packageName)
+    ; install的时候要查看package.json
+    pkgJson := JsonLoad(A_InitialWorkingDir.ConcatP("package.json"))
+    deps := pkgJson.Has('devDependencies') ? pkgJson["devDependencies"] :  Map()
 
-        }catch{
-            println(isChinese ? packageName.Concat("下载失败") : packageName.Concat(" download failed"))
+    for packageName in argObj.packageNames {
+        normalPkgName := normalizePackageName(packageName)
+        if packageName.TrimLeft("@").Includes("@") || !deps.Has(normalPkgName) {
+            try{
+                ; 先解析包名和版本号
+                getPkgNameAndVersion(packageName, &pkgName, &pkgVersion, &pkgNameAtVersion)
+                ; 根据包名和版本号来下载具体的包
+                downloadPackage(pkgName, pkgVersion)
+                ; 这里将下载好的包放到当前的目录下面
+                installPackageToLocal(pkgName, pkgVersion, pkgNameAtVersion)
+                ; 将当前的下载的包保存到package.json
+                savePackageInfo(pkgName, pkgVersion)
+    
+            }catch Error as err{
+                println(err)
+                println(isChinese ? packageName.Concat("下载失败") : packageName.Concat(" download failed"))
+            }
+        }else{
+            try {
+                ; 根据包名和版本号来下载具体的包
+                pkgVersion := deps[normalPkgName]
+                downloadPackage(normalPkgName, pkgVersion)
+                ; 这里将下载好的包放到当前的目录下面
+                installPackageToLocal(normalPkgName, pkgVersion, normalPkgName "@" pkgVersion)
+                ; 将当前的下载的包保存到package.json
+                savePackageInfo(normalPkgName, pkgVersion)
+            }catch Error as err{
+                println(err)
+                println(isChinese ? packageName.Concat("下载失败") : packageName.Concat(" download failed"))
+            }
         }
+        
     }
 }
 
-; 根据用户输入的包名获取包名和包的版本号
-getPkgNameAndVersion(inputPkgName, &pkgName, &pkgVerison){
+installDeps(){
+    ; 解析当前目录的所有依赖,要通过package.json
+    pkgJson := JsonLoad(A_InitialWorkingDir.ConcatP("package.json"))
 
+    if !pkgJson.Has("devDependencies") {
+        println(isChinese ? "当前目录中的项目未查询到依赖" : "No dependencies found for the project in the current directory.")
+        return
+    }
+    for pkgName, pkgVersion in pkgJson["devDependencies"] {
+        downloadPackage(pkgName, pkgVersion)
+        ; 这里将下载好的包放到当前的目录下面
+        installPackageToLocal(pkgName, pkgVersion, pkgName "@" pkgVersion)
+    }
 }
 
-; 安装包到本地的目录下面,其实就是在当前目录下面创建一个 Lib 并且给出对应的内容
-installPackageToLocal(packageName){
+; https://docs.npmjs.com/cli/v10/configuring-npm/package-json
+initHandle(){
+    global npmrc
+    ; 初始化项目,就是创建一个package.json, 在当前目录下创建一个
+    if !FileExist(A_InitialWorkingDir.ConcatP("package.json")) {
+        FileAppend packageJsonText.Replace("packageName", A_InitialWorkingDir.BaseName()), A_InitialWorkingDir.ConcatP("package.json"), "utf-8"
+    }
+    ; 获取package.json
+    pkg := JSON.Load(FileRead(A_InitialWorkingDir.ConcatP("package.json"),"utf-8"))
+    if pkg.Has("npmrc") {
+        npmrc := npmrc.Union(pkg["npmrc"]).Unique()
+    }
+}
+
+updateHandle(){
+
+    initHandle() ; 初始化package.json
+    pkgJson := JsonLoad(A_InitialWorkingDir.ConcatP("package.json"))
+    deps := pkgJson.Has('devDependencies') ? pkgJson["devDependencies"] :  Map()
+
+    for packageName in argObj.packageNames {
+        try{
+            ; 先解析包名和版本号
+            getPkgNameAndVersion(packageName, &pkgName, &pkgVersion, &pkgNameAtVersion)
+            ; 根据包名和版本号来下载具体的包
+            downloadPackage(pkgName, pkgVersion)
+            ; 这里将下载好的包放到当前的目录下面
+            installPackageToLocal(pkgName, pkgVersion, pkgNameAtVersion)
+            ; 将当前的下载的包保存到package.json
+            savePackageInfo(pkgName, pkgVersion)
+
+        }catch Error as err{
+            println(err)
+            println(isChinese ? packageName.Concat("下载失败") : packageName.Concat(" download failed"))
+        }
+        
+    }
+}
+
+removeHandle(){
+    ; 删除包可能是本地也可能是全局
+    if !argObj.packageNames.Length {
+        return
+    }
+    baseDir := argObj.globalFlag ? ahkDirPath.ConcatP("Lib") : A_InitialWorkingDir.ConcatP("Lib")
+
+    if argObj.globalFlag {
+        for pkgName in argObj.packageNames {
+            try FileDelete(baseDir.ConcatP(pkgName ".ahk"))
+        }    
+    }else{
+        pkgJson := JsonLoad(baseDir.SplitRight("\",1)[1].ConcatP("package.json"))
+        deps := pkgJson.Has("devDependencies") ? pkgJson["devDependencies"] : Map()
+        for pkgName in argObj.packageNames {
+            try FileDelete(baseDir.ConcatP(pkgName ".ahk"))
+
+            if deps.Has(normalizePackageName(pkgName)) {
+                deps.Delete(normalizePackageName(pkgName))
+            }
+        }
+        
+        JsonDump(pkgJson, baseDir.SplitRight("\",1)[1].ConcatP("package.json"))
+    }
     
 }
 
-; 将安装的包的信息保存到package.json
-savePackageInfo(packageName){
+versionHandle(){
+    println(isChinese ? "当前apm版本为:".Concat(apm_version) : "The current APM version is:".Concat(apm_version))
+}
 
+listHandle(){
+    if argObj.globalFlag {
+        ; 列出全局的包
+        println(isChinese ? "全局安装的包列表:" : "List of globally installed packages:")
+        loop files ahkDirPath.ConcatP("Lib", "*"), "D" {
+            println("- " A_LoopFileName)
+        }
+        return
+    }
+
+    ; 列出本地的包
+    println(isChinese ? "本地安装的包列表:" : "List of locally installed packages:")
+    localLibDir := A_InitialWorkingDir.ConcatP("Lib")
+    loop files localLibDir.ConcatP("*") {
+        codeText := FileRead(A_LoopFileFullPath, "utf-8")
+        RegExMatch(codeText, "<([^>]+)>", &ms)
+        println("- " ms[1].SplitRight("\", 1)[1])
+    }
+
+
+}
+
+; 根据用户输入的包名获取包名和包的版本号
+getPkgNameAndVersion(inputPkgName, &pkgName, &pkgVerison, &pkgNameAtVersion?){
+    ; 正常化包名
+    packageName := normalizePackageName(inputPkgName)
+    ; 包名不带版本
+    pkgName := packageName.SplitRight("@", 1)[1]
+
+    
+    pkgVerison := getPackageVersion(packageName)
+    if !pkgVerison {
+        println(isChinese ? packageName.Concat("版本获取失败,请检查网络并重试.") : packageName.Concat("Failed to obtain the version. Please check the network and try again."))
+        return
+    }
+    pkgNameAtVersion := pkgName "@" pkgVerison
+    
+    
+}
+
+; 安装包到本地的目录下面,其实就是在当前目录下面创建一个 Lib 并且给出对应的内容
+installPackageToLocal(pkgName, pkgVersion, pkgNameAtVersion){
+    ; 如果pkgName以ahk-开头那么删除这个开头
+    if pkgName.StartsWith("ahk-"){
+        /**@var {String} pkgName*/
+        pkgName := pkgName.Split("ahk-", 1)[2]
+    }
+    localPath := argObj.globalFlag ? ahkDirPath.ConcatP("Lib") : A_InitialWorkingDir.ConcatP("Lib") ; 这里要判断全局
+    if !DirExist(localPath) {
+        DirCreate(localPath)
+    }
+    ; 读取package.json中的main信息,这个信息确定入口
+    pkgJsonPath := ahkDirPath.ConcatP("Lib",pkgNameAtVersion, "package.json")
+    pkg := JsonLoad(pkgJsonPath)
+
+    if pkg.Has("main") {
+        libFilePath := localPath.ConcatP(pkgName ".ahk")
+        if FileExist(libFilePath) {
+            try FileDelete(libFilePath)
+        }
+        FileAppend("#Include <" pkgNameAtVersion "\" pkg["main"].SplitRight(".", 1)[1] ">", libFilePath, "utf-8")
+        return
+    }
+    println(isChinese ? pkgNameAtVersion.Concat("没有导出模块.") : pkgNameAtVersion.Concat("No export module."))
+
+}
+
+; 将安装的包的信息保存到package.json
+savePackageInfo(pkgName, pkgVersion){
+    ; 全局安装不保存package.json信息
+    if argObj.globalFlag {
+        return 
+    }
+    ; 判断当前目录有没有package.json如果没有就创建,有就添加
+    localPkgJsonPath := A_InitialWorkingDir.ConcatP("package.json")
+    if !FileExist(localPkgJsonPath) {
+        initHandle() ; 没有package.json 就说明还没初始化,那么初始化一下
+    }
+    pkg := JsonLoad(localPkgJsonPath)
+    if !pkg.Has("devDependencies") {
+        pkg["devDependencies"] := Map()
+    }
+
+    pkg["devDependencies"][pkgName] := pkgVersion
+
+    JsonDump(pkg, localPkgJsonPath)
+
+}
+
+JsonLoad(filePath){
+    text := FileRead(filePath, "utf-8")
+    return JSON.Load(text)
+}
+
+JsonDump(jsonObj, filePath){
+    try FileDelete(filePath)
+    FileAppend(JSON.Dump(jsonObj, 4), filePath, "utf-8")
 }
 
 downloadPackage(pkgName, pkgVersion){
     
-    println(isChinese ? "正在下载: ".Concat(packageName, "...") : "downloading: ".Concat(packageName, "..."))
-    ; 正常化包名
-    packageName := normalizePackageName(packageName)
-    ; 包名不带版本
-    packageNameNoVersion := packageName.SplitRight("@", 1)[1]
-
-    
-    curVersion := getPackageVersion(packageName)
-    if !curVersion {
-        println(isChinese ? packageName.Concat("版本获取失败,请检查网络并重试.") : packageName.Concat("Failed to obtain the version. Please check the network and try again."))
-        return
-    }
+    pkgNameAtVersion := pkgName "@" pkgVersion
+    println(isChinese ? "正在下载: ".Concat(pkgNameAtVersion, "...") : "downloading: ".Concat(pkgNameAtVersion, "..."))
 
     ; 下载前看一下是不是已经有了,如果有了就不下载
-    if DirExist(ahkDirPath.ConcatP("Lib",packageNameNoVersion "@" curVersion)) {
-        println(isChinese ? packageName.Concat("下载完成") : packageName.Concat("download completes"))
+    if DirExist(ahkDirPath.ConcatP("Lib",pkgNameAtVersion)) {
+        println(isChinese ? pkgNameAtVersion.Concat("下载完成") : pkgNameAtVersion.Concat("download completes"))
         return
     }
     
@@ -155,22 +353,23 @@ downloadPackage(pkgName, pkgVersion){
             DirCreate(ahkDirPath.ConcatP("downloads"))
         }catch{
             msgbox(isChinese ? "下载目录创建失败,请确认有足够权限并重试!" : "Failed to create the download directory. Please confirm that you have sufficient permissions and try again!")
+            return
         }
     }
 
     ; 这里肯定拿到版本了,直接下载
     for rc in npmrc {
-        packageUrl := rc.Concat("/", packageName, "/-/", packageName.Split("/")[-1], "-", curVersion, ".tgz")
-        distFile := ahkDirPath.ConcatP("downloads", packageName ".tgz")
+        packageUrl := rc.Concat("/", pkgName, "/-/", pkgName.Split("/")[-1], "-", pkgVersion, ".tgz")
+        distFile := ahkDirPath.ConcatP("downloads", pkgNameAtVersion ".tgz")
         tempDir := ahkDirPath.ConcatP("downloads","Temp" A_Now A_MSec) ; 用于解压的临时目录
-        println("下载的包url:", packageUrl)
-        println("下载到的目录:", distFile)
+        ; println("下载的包url:", packageUrl)
+        ; println("下载到的目录:", distFile)
         try{
             Download(packageUrl, distFile)
-            println("下载成功")
+            ; println("下载成功")
             ; 如果下载成功就解压文件到Lib
         }catch{
-            println("下载失败继续")
+            ; println("下载失败继续")
             continue
         }
 
@@ -183,7 +382,7 @@ downloadPackage(pkgName, pkgVersion){
 
         ; 7z 解压tgz文件要解压两次,沃日,真tmd恶心啊草tmd.
         unzipCmd2 := "7z.exe x `"".Concat(
-            tempDir.ConcatP(packageName ".tar"), '" ',
+            tempDir.ConcatP(pkgNameAtVersion ".tar"), '" ',
             "-o`"", tempDir, '"'
         )
         ; println("两条命令分别为")
@@ -195,7 +394,7 @@ downloadPackage(pkgName, pkgVersion){
             if DirExist(tempDir){
                 try DirDelete(tempDir, 1)
             }
-            msgbox(isChinese ? packageName.Concat("1.包解压失败!请检查后重试!`n", ret.Output) : packageName.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
+            msgbox(isChinese ? pkgNameAtVersion.Concat("1.包解压失败!请检查后重试!`n", ret.Output) : pkgNameAtVersion.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
             ExitApp
         }
 
@@ -206,37 +405,37 @@ downloadPackage(pkgName, pkgVersion){
             if DirExist(tempDir){
                 try DirDelete(tempDir, 1)
             }
-            msgbox(isChinese ? packageName.Concat("2.包解压失败!请检查后重试!`n", ret.Output) : packageName.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
+            msgbox(isChinese ? pkgNameAtVersion.Concat("2.包解压失败!请检查后重试!`n", ret.Output) : pkgNameAtVersion.Concat("Package decompression failed! Please check and try again!`n", ret.Output))
             ExitApp
         }
 
         
         
         ; 移动到对应的目录并重新命名
-        packageDistDir := ahkDirPath.ConcatP("Lib", packageNameNoVersion "@" curVersion) ; 目标文件夹
+        packageDistDir := ahkDirPath.ConcatP("Lib", pkgNameAtVersion) ; 目标文件夹
         try{
             DirMove(tempDir.ConcatP("package"), packageDistDir, 2)
             try DirDelete(tempDir, true)
             try DirDelete(ahkDirPath.ConcatP("downloads"), true)
             break
         }catch{
-            msgbox(isChinese ? packageName.Concat("重命名失败!请检查后重试!") : packageName.Concat("Renaming failed! Please check and try again!"))
+            msgbox(isChinese ? pkgNameAtVersion.Concat("重命名失败!请检查后重试!") : pkgNameAtVersion.Concat("Renaming failed! Please check and try again!"))
             ExitApp
         }
     }
-    println(isChinese ? packageName.Concat("下载完成") : packageName.Concat("download completes"))
+    println(isChinese ? pkgNameAtVersion.Concat("下载完成") : pkgNameAtVersion.Concat("download completes"))
     ; 如果下载成功并解包成功就继续判断并下载对应的依赖项
     ; 读取下面的package.json,拿到依赖列表并下载
     try {
         packageText := FileRead(packageDistDir.ConcatP("package.json"), "utf-8")
         pkg := JSON.Load(packageText)
         if pkg.Has("devDependencies") && pkg["devDependencies"].Length != 0 {
-            for pkgName, pkgVersion in pkg["devDependencies"] {
-                downloadPackage(pkgName "@" pkgVersion)
+            for pkgN, pkgV in pkg["devDependencies"] {
+                downloadPackage(pkgN, pkgV)
             }
         }
     }catch {
-        msgbox(isChinese ? packageName.Concat("包依赖读取失败,请检查后重试!") : packageName.Concat("Packet dependency read failed, please check and try again!"))
+        msgbox(isChinese ? pkgNameAtVersion.Concat("包依赖读取失败,请检查后重试!") : pkgNameAtVersion.Concat("Packet dependency read failed, please check and try again!"))
         ExitApp
     }
     
@@ -282,37 +481,6 @@ getVersionByNpmRC(packageName, versionStr){
         }
     }
     return ""
-}
-
-
-installDeps(){
-    println("安装所有的依赖")
-}
-
-; https://docs.npmjs.com/cli/v10/configuring-npm/package-json
-initHandle(){
-    global npmrc
-    ; 初始化项目,就是创建一个package.json, 在当前目录下创建一个
-    if !FileExist(A_InitialWorkingDir.ConcatP("package.json")) {
-        FileAppend packageJsonText.Replace("packageName", A_InitialWorkingDir.BaseName()), A_InitialWorkingDir.ConcatP("package.json"), "utf-8"
-    }
-    ; 获取package.json
-    pkg := JSON.Load(FileRead(A_InitialWorkingDir.ConcatP("package.json"),"utf-8"))
-    if pkg.Has("npmrc") {
-        npmrc := npmrc.Union(pkg["npmrc"]).Unique()
-    }
-}
-
-updateHandle(){
-
-}
-
-removeHandle(){
-
-}
-
-versionHandle(){
-
 }
 
 

@@ -6,19 +6,27 @@
     apm install 安装所有的依赖
     apm install packageName@version ... 安装多个依赖
     apm init 初始化一个ahk项目,一般不需要
-    apm update packageName@version ... 更新多个包
+    apm update packageName@version ... 更新多个包,目前和install是一样的
     apm remove packageName 移除多个依赖
     apm version 打印版本号
+    apm -g packageName 全局安装
+    apm list 列出本地安装的包信息
+    apm -g list 列出全局安装的包信息
+    
 */
 ParserArgs(){
-    args := A_Args[]
+    globalFlag := A_Args.IncludeSome("-g", "/g")
+    args := (A_Args[]).Filter(item => !item.StartsWith("/") && !item.StartsWith("-"))
     command := args.Shift()
+    if command == "i" {
+        command := "install"
+    }
     return {
         command: command,
-        packageNames: args
+        packageNames: args,
+        globalFlag: globalFlag
     }
 }
-
 
 
 ; ----------------------------------------------------------------------------------------------------------------------

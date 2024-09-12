@@ -1,19 +1,22 @@
 ﻿{
-    "name": "apm",
-    "version": "1.0.0",
-    "main": "apm.ahk",
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
-    },
-    "author": "",
-    "license": "ISC",
-    "description": "",
-    "autohotkey": true,
-    "npmrc": [
-        "https://registry.npmjs.org",
-        "https://registry.npmmirror.com",
-        "https://registry.yarnpkg.com",
-        "https://r.cnpmjs.org",
-        "https://mirrors.cloud.tencent.com/npm"
-    ]
+	"author": "",
+	"autohotkey": 1,
+	"description": "",
+	"devDependencies": {
+		"ahk-stdlib": "0.0.3"
+	},
+	"license": "ISC",
+	"main": "apm.ahk",
+	"name": "apm",
+	"npmrc": [
+		"https://registry.npmjs.org",
+		"https://registry.npmmirror.com",
+		"https://registry.yarnpkg.com",
+		"https://r.cnpmjs.org",
+		"https://mirrors.cloud.tencent.com/npm"
+	],
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"version": "1.0.0"
 }
