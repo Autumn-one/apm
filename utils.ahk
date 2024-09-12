@@ -17,7 +17,11 @@
 ParserArgs(){
     globalFlag := A_Args.IncludeSome("-g", "/g")
     args := (A_Args[]).Filter(item => !item.StartsWith("/") && !item.StartsWith("-"))
-    command := args.Shift()
+    if args.Length == 0 {
+        command := "version"
+    }else{
+        command := args.Shift()
+    }
     if command == "i" {
         command := "install"
     }

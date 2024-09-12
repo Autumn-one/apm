@@ -1,5 +1,5 @@
 ﻿{
-	"author": "",
+	"author": "Autumn",
 	"autohotkey": 1,
 	"description": "",
 	"devDependencies": {
@@ -7,7 +7,7 @@
 	},
 	"license": "ISC",
 	"main": "apm.ahk",
-	"name": "apm",
+	"name": "ahk-apm",
 	"npmrc": [
 		"https://registry.npmjs.org",
 		"https://registry.npmmirror.com",
